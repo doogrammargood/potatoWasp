@@ -42,9 +42,9 @@ cv2.destroyAllWindows()
 #write data
 import csv
 with open(output_path, 'w') as csvfile:
-    fieldnames = ['x_position', 'y_position', 'radius', 'frame']
+    fieldnames = ['x_position', 'y_position', 'frame', 'radius']
     writer = csv.DictWriter(csvfile, fieldnames = fieldnames)
     writer.writeheader()
     for data in output_data:
         x, y, r, f = data[0], data[1], data[2], data[3]
-        writer.writerow({'x_position': x, 'y_position': y, 'radius': r, 'frame': f})
+        writer.writerow({'x_position': x, 'y_position': y, 'frame': f, 'radius': r})

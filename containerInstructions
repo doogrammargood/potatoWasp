@@ -1,3 +1,5 @@
 Here's the command to create a docker countainer, mounting the X11 socket into said container with opencv and python.
 
 sudo docker run --rm -ti -v $PWD:/srv -v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY=:0 --name tutorialContainer vics-poff
+
+use ' xhost + ' outside of the container if it wont start.
