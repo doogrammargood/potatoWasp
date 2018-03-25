@@ -1,4 +1,4 @@
-FROM ubuntu:16.10
+FROM ubuntu:16.04
 LABEL maintainer "jakub.skalecki@gmail.com"
 
 #2.7
@@ -13,7 +13,7 @@ RUN apt-get -y update && apt-get -y install python$PYTHON_VERSION-dev wget unzip
     && wget https://github.com/Itseez/opencv/archive/3.2.0.zip -O opencv3.zip \
     && unzip -q opencv3.zip && mv /opencv-3.2.0 /opencv && rm opencv3.zip \
     && wget https://github.com/Itseez/opencv_contrib/archive/3.2.0.zip -O opencv_contrib3.zip \
-    && unzip -q opencv_contrib3.zip && mv /opencv_contrib-3.2.0 /opencv_contrib && rm opencv_contrib3.zip \
+    && unzip -q opencv_contrib3.zip && mv /opencv_contrib-3.2.0 /opencv_contrib && rm opencv_contrib3.zip \ 
 
     # prepare build
     && mkdir /opencv/build && cd /opencv/build \

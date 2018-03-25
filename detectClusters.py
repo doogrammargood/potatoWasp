@@ -10,7 +10,7 @@ currentClusters = [] #An array of arrays of centers of circles from the past 5 f
 foundClusters = [] #An array of tuples (x, y, frame) where the cluster is found
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
 frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-outputVideo = cv2.VideoWriter('haavard_output.avi', cv2.VideoWriter_fourcc(*'WMV2'), 20, (frame_width,frame_height))
+outputVideo = cv2.VideoWriter('haavard_output.avi', cv2.VideoWriter_fourcc(*'XVID'), 20, (frame_width,frame_height))
 def addFrameNumber(x):
     #print frameNumber
     x.append(frameNumber)
@@ -91,9 +91,7 @@ while(True):
     currentPeaks = filter(lambda x: x[2] == frameNumber, peaks)
     if not currentPeaks is None:
         for p in currentPeaks:
-            print p
             cv2.circle(foreground, (p[0], p[1]), 2, (255,255,255), 2)
-            print "drawn"
     outputVideo.write(frame)
     cv2.imshow('frame',foreground)
     k = cv2.waitKey(30) & 0xff
