@@ -129,7 +129,7 @@ def distance2D(p, q):
     dist = math.sqrt((p[0]-q[0])**2 + (p[1]-q[1])**2)
     return dist
 
-def getStateFromFilter(kalman):
+def getPredictedStateFromFilter(kalman): #predicts the state in the next frame.
     predicted_state = kalman.predict()
     predicted_state = predicted_state.transpose()[0]
     ball_x_positions = [a[1] for a in enumerate(predicted_state) if a[0]%4==0]
@@ -138,8 +138,17 @@ def getStateFromFilter(kalman):
     ball_y_velocities = [a[1] for a in enumerate(predicted_state) if a[0]%4==3]
     predicted_ball_centers = zip(ball_x_positions, ball_y_positions)
     predicted_ball_velocities = zip(ball_x_velocities, ball_y_velocities)
+    return predicted_ball_centers, predicted_ball_velocities
 
-
+def getStateFromFilter(kalman): #gets the current state from the filter
+    current_state = kalman.statePost
+    current_state = current_state.transpose()[0]
+    ball_x_positions = [a[1] for a in enumerate(current_state) if a[0]%4==0]
+    ball_y_positions = [a[1] for a in enumerate(current_state) if a[0]%4==1]
+    ball_x_velocities = [a[1] for a in enumerate(current_state) if a[0]%4==2]
+    ball_y_velocities = [a[1] for a in enumerate(current_state) if a[0]%4==3]
+    predicted_ball_centers = zip(ball_x_positions, ball_y_positions)
+    predicted_ball_velocities = zip(ball_x_velocities, ball_y_velocities)
     return predicted_ball_centers, predicted_ball_velocities
 
 def addZeros(measurementArray):
@@ -177,30 +186,24 @@ def findBallsInImage(image, kalman, isFirstFrame=False):
 
         pairings = []
         temp_output_data = []
-        predictedBallCenters, predictedBallVelocities = getStateFromFilter(kalman)
-        for pair in itertools.product(predictedBallCenters, centers):
-            ballCenter = pair[0]
-            center = pair[1]
-            distance = distance2D(ballCenter, center)
-            pairings.append([pair[0], pair[1], distance])
-            #temp_output_data.append(distance2D(theoreticalVelocity, ballVelocity))
-
-        # Sort pairings by resulting distance element
+        predictedBallCenters, predictedBallVelocities = getPredictedStateFromFilter(kalman)
 
         #The Hungarian Algorithm:
         cost_matrix = [ [ [predictedBallCenters[i], centers[j]] for j in range(len(centers))] for i in range(len(predictedBallCenters)) ]
         cost_matrix = map(lambda row: map(lambda pair: distance2D(pair[0], pair[1]),row), cost_matrix)
         _, column_permutation =  scipy.optimize.linear_sum_assignment(np.array(cost_matrix)) #an array whose ith element is the index of centers, which is paired to predictedBallCenters[i] in the optimal paring.
         new_measurements = []
-        for index in column_permutation:
-            new_measurements.append(centers[index])
+        for prediction_index, center_index in enumerate(column_permutation):
+            new_measurements.append(centers[center_index])
+            #temp_output_data.append(cost_matrix[prediction_index][center_index])
+            current_position, _ = getStateFromFilter(kalman)
+            temp_output_data = [i[1] for i in current_position]
 
         new_measurements = sum(new_measurements, []) #flattens the array.
         if isFirstFrame:
             kalman.statePost = np.array([addZeros(new_measurements)],np.float32).transpose()
         else:
             kalman.correct(np.array([new_measurements],np.float32).transpose())
-            print new_measurements
         output_data.append(temp_output_data)
         #if len(min_matches) != numBalls:
         #    print 'matching failed'
@@ -210,7 +213,7 @@ def findBallsInImage(image, kalman, isFirstFrame=False):
 
 def drawBallsAndTrajectory(frameCopy, kalman):
     # print len(matches)
-    ballCenters, ballVelocities = getStateFromFilter(kalman)
+    ballCenters, ballVelocities = getPredictedStateFromFilter(kalman)
 
     matchedIndices = []
     for i in range(len(ballCenters)):
@@ -311,7 +314,7 @@ def main():
             # Open to remove small elements/noise
             thresholdImage = smoothNoise(thresholdImage)
             # We'll use ballIndices to only select from a subset of the balls to pair
-            ballCenters, ballVelocities = getStateFromFilter(kalman)
+            ballCenters, ballVelocities = getPredictedStateFromFilter(kalman)
 
             # Find the points in the image where this is true, and get the matches that pair
             # these points to the balls that we're already tracking
@@ -342,7 +345,7 @@ def main():
         if k == 27:
             # User hit ESC
             break
-    output_path = './throw_catch_data2.csv'
+    output_path = './correctData.csv'
 
     with open(output_path, 'w') as csvfile:
         fieldnames = ['frame', 'ball1Error', 'ball2Error', 'ball3Error', 'ball4Error']
@@ -352,6 +355,7 @@ def main():
         output_data = map(lambda x: [x[0]] + x[1], zip(range(len(output_data)),output_data))
         for data in output_data:
             #x, y, r, f = data[0], data[1], data[2], data[3]
+            print data
             writer.writerow({'frame': data[0], 'ball1Error': data[1], 'ball2Error': data[2], 'ball3Error': data[3], 'ball4Error': data[4]})
 
     cap.release()

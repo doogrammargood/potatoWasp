@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-cap = cv2.VideoCapture('crazy5b.avi')
+cap = cv2.VideoCapture('juggling.mp4')
 fgbg = cv2.bgsegm.createBackgroundSubtractorMOG()
 output_data = []
 frameNumber = 0
@@ -21,12 +21,11 @@ while(True):
     fgmask = fgbg.apply(frame)
     foreground = cv2.bitwise_and(frame, frame, mask = fgmask)
     circles = cv2.HoughCircles(foreground,cv2.HOUGH_GRADIENT,1,20,
-                            param1=20,param2=10,minRadius=5,maxRadius=10)
+                            param1=20,param2=30,minRadius=5,maxRadius=40)
     if not circles is None:
-
         circleList = list(map(lambda x: addFrameNumber(x), circles.tolist()[0]))
         output_data.extend(circleList)
-        print circleList
+        #print circleList
         for i in circles[0,:]:
             # draw the outer circle
             cv2.circle(foreground,(i[0],i[1]),i[2],(255,255,255),2)
