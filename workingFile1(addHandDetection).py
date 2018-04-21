@@ -10,42 +10,19 @@ import csv
 import copy
 from scipy.linalg import block_diag
 import scipy.optimize
+from scipy.cluster.hierarchy import dendrogram, linkage
+from scipy.cluster.hierarchy import cophenet, fcluster
+from scipy.spatial.distance import pdist
+from scipy import stats
 
-# import tensorflow as tf #for hand detection
-# PATH_TO_CKPT = "frozen_inference_graph.pb"
-# detection_graph = tf.Graph()
-# with detection_graph.as_default():
-#     od_graph_def = tf.GraphDef()
-#     with tf.gfile.GFile(PATH_TO_CKPT, 'rb') as fid:
-#         serialized_graph = fid.read()
-#         od_graph_def.ParseFromString(serialized_graph)
-#         tf.import_graph_def(od_graph_def, name='')
-#     sess = tf.Session(graph=detection_graph)
-# print(">  ====== Hand Inference graph loaded.")
-#
 
-numBalls = 4 #This needs to be automated
+numBalls = 3 #This needs to be automated
 
 ballPositionMarkerColors = ((200,0,0), (255,200,200), (0,200,0), (0,0,200))
 ballTrajectoryMarkerColors = ((200,55,55), (255,200,200), (55,255,55), (55,55,255))
 
-videoFilename = 'juggling.mp4'
+videoFilename = 'example_videos/Juggling4.mov'
 
-pixelsPerMeter = 600.0 # Just a guess from looking at the video (juggling.mp4)
-# pixelsPerMeter = 980.0 # Just a guess from looking at the video (juggling2.mp4)
-FPS = 30.0 #estimation. The video appears slowed
-
-# Euler's method will proceed by timeStepSize / timeStepPrecision at a time
-timeStepSize = 1.0 / FPS
-timeStepPrecision = 1.0
-
-# Number of Euler's method steps to take
-eulerSteps = 100
-
-# Gravitational acceleration is in units of pixels per frame squared
-acceleration = 9.81 * pixelsPerMeter * FPS**-2
-# Per-timestep gravitational acceleration (pixels per timestep squared)
-gTimesteps = acceleration * (timeStepSize**2)
 
 # Get a frame from the current video source
 def getFrame(cap):
@@ -58,23 +35,6 @@ def blur(image):
     blurredImage = cv2.medianBlur(image, 5)
     return blurredImage
 
-def eulerExtrapolate(position, velocity, acceleration):
-    position[0] += velocity[0]
-    position[1] += velocity[1]
-
-    velocity[0] += acceleration[0]
-    velocity[1] += acceleration[1]
-
-    return (position, velocity)
-
-def getTrajectory(initialPosition, initialVelocity, acceleration, numTrajPoints):
-    positions = []
-    position = list(initialPosition)
-    velocity = list(initialVelocity)
-    for i in range(numTrajPoints):
-        position, velocity = eulerExtrapolate(position, velocity, acceleration)
-        positions.append(position[:])
-    return positions
 
 
 def rejectOutlierPoints(points, m=2):
@@ -94,18 +54,17 @@ def rejectOutlierPoints(points, m=2):
 
 # Performs all necessary pre-processing steps before the color thresholding
 def processForThresholding(frame):
-    blurredFrame = blur(frame)
+    #blurredFrame = blur(frame)
 
-    if True:
-        # Subtract background (makes isolation of balls more effective, in combination with thresholding)
-        fgbg = cv2.createBackgroundSubtractorMOG2()
-        fgmask = fgbg.apply(frame)
-        frame = cv2.bitwise_and(frame,frame, mask = fgmask)
+    #Subtract background (makes isolation of balls more effective, in combination with thresholding)
+    #fgbg = cv2.createBackgroundSubtractorMOG2()
+    #fgmask = fgbg.apply(frame)
+    #frame = cv2.bitwise_and(frame,frame, mask = fgmask)
 
     # Convert to HSV color space
-    #hsvBlurredFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    return frame
-    #return hsvBlurredFrame
+    hsvBlurredFrame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    #return frame
+    return hsvBlurredFrame
 
 def smoothNoise(frame):
     kernel = np.ones((6,6)).astype(np.uint8)
@@ -149,8 +108,9 @@ def addZeros(measurementArray):
     measurementArray=measurementArray.reshape(2*length, order = 'F')
     return measurementArray
 
-def findBallsInImage(image, kalman, isFirstFrame=False):
+def findBallsInImage(image, kalman, isFirstFrame=False, frameCount=0):
     numBallsToFind = numBalls
+    cutoff = 100
 
     # Get a list of all of the non-blank points in the image
     points = np.dstack(np.where(image>0)).astype(np.float32)
@@ -165,6 +125,7 @@ def findBallsInImage(image, kalman, isFirstFrame=False):
         criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
         compactness, labels, centers = cv2.kmeans(points, numBallsToFind, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
 
+
         centers = centers.tolist()
 
         # Centers come to us in (y, x) order. This is annoying, so we'll switch it to (x, y) order.
@@ -177,10 +138,18 @@ def findBallsInImage(image, kalman, isFirstFrame=False):
         #The Hungarian Algorithm:
         cost_matrix = [ [ [predictedBallCenters[i], centers[j]] for j in range(len(centers))] for i in range(len(predictedBallCenters)) ]
         cost_matrix = map(lambda row: map(lambda pair: distance2D(pair[0], pair[1]),row), cost_matrix)
-        _, column_permutation =  scipy.optimize.linear_sum_assignment(np.array(cost_matrix)) #an array whose ith element is the index of centers, which is paired to predictedBallCenters[i] in the optimal paring.
+        _, column_permutation = scipy.optimize.linear_sum_assignment(np.array(cost_matrix)) #an array whose ith element is the index of centers, which is paired to predictedBallCenters[i] in the optimal paring.
         new_measurements = []
+        
         for prediction_index, center_index in enumerate(column_permutation):
-            new_measurements.append(centers[center_index])
+            if cost_matrix[prediction_index][center_index] < cutoff or frameCount < 20:
+                #print cost_matrix[prediction_index][center_index]
+                #print frameCount
+                new_measurements.append(centers[center_index])
+            else:
+                #print 'k means failure'
+                #print predictedBallCenters[prediction_index]
+                new_measurements.append(list(predictedBallCenters[prediction_index])) #assume the ball stays where it is, if no accurate reading was found.
             current_position, _ = getStateFromFilter(kalman)
             temp_output_data = [i[1] for i in current_position]
 
@@ -208,19 +177,11 @@ def drawBallsAndTrajectory(frameCopy, kalman):
         velocityY = ballVelocities[i][1]
         cv2.circle(frameCopy, (centerX, centerY), 6, ballPositionMarkerColors[i], thickness=6)
 
-        positions = getTrajectory((centerX, centerY), (velocityX, velocityY), (0, gTimesteps), eulerSteps)
-
-        for position in positions:
-            height, width, depth = frameCopy.shape
-            if (position[0] < width) and (position[1] < height):
-                cv2.circle(frameCopy, (int(position[0]), int(position[1])), 2, ballTrajectoryMarkerColors[i], thickness=2)
-
     return frameCopy
 
 global hsvColorBounds
-hsvColorBounds = {}
-#hsvColorBounds['red'] = (np.array([-5, 250, 235], np.uint8),np.array([5,  260, 275], np.uint8))
-hsvColorBounds['red'] = (np.array([5, 0, 147], np.uint8),np.array([45,  32, 187], np.uint8)) #bgr
+hsvColorBounds={}
+hsvColorBounds['red'] = (np.array([166, 84, 131], np.uint8),np.array([186,  239, 244], np.uint8)) #bgr
 global output_data
 output_data = []
 #hsvColorBounds['red'] = (np.array([0, 153, 127],np.uint8), np.array([4, 230, 179],np.uint8))
@@ -249,37 +210,16 @@ def createFilter(balls):
     return kalman
 
 def main():
-
-    def pick_color(event,x,y,flags,param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            pixel = image_hsv[y,x]
-
-            #you might want to adjust the ranges(+-10, etc):
-            thresh_value = 25
-            upper =  np.array([pixel[0] + thresh_value, pixel[1] + thresh_value, pixel[2] + 4*thresh_value])
-            lower =  np.array([pixel[0] - thresh_value, pixel[1] - thresh_value, pixel[2] - 4*thresh_value])
-            image_mask = cv2.inRange(image_hsv,lower,upper)
-            hsvColorBounds['red'] = (lower, upper)
-            cv2.imshow("mask",image_mask)
-
     kalman = createFilter(numBalls)
     showBallDetectionData = False
-
+    global frameCount
     # Get a camera input source
     cap = cv2.VideoCapture(videoFilename)
 
-    #cv2.namedWindow('hsv')
-    #firstFrame = getFrame(cap) #use the first frame to set the color bounds.
-    #firstFrame = getFrame(cap)
-    #image_hsv = cv2.cvtColor(firstFrame, cv2.COLOR_BGR2HSV)
-    #cv2.setMouseCallback('hsv', pick_color)
-    #cv2.imshow("hsv",image_hsv)
-
-    # Get a video output sink
-    fourcc1 = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter('output.avi',fourcc1, 20.0, (640,480))
     boolFirstFrame=True
+    frameCount = 0 
     while(cap.isOpened()):
+        frameCount+=1
         frame = getFrame(cap)
         if frame is None:
             break
@@ -300,48 +240,35 @@ def main():
 
             # Find the points in the image where this is true, and get the matches that pair
             # these points to the balls that we're already tracking
-            if hsvColorBounds != (np.array([-5, 250, 235], np.uint8),np.array([5,  260, 275], np.uint8)) and boolFirstFrame:
-                findBallsInImage(thresholdImage, kalman, isFirstFrame = boolFirstFrame)
+            if boolFirstFrame:
+                findBallsInImage(thresholdImage, kalman, isFirstFrame = boolFirstFrame, frameCount = frameCount)
                 boolFirstFrame = False
             else:
-                if not boolFirstFrame:
-                    findBallsInImage(thresholdImage, kalman, isFirstFrame = False)
+                findBallsInImage(thresholdImage, kalman, isFirstFrame = False, frameCount = frameCount)
 
             frameCopy = drawBallsAndTrajectory(frameCopy, kalman)
 
-        if showBallDetectionData:
-            combinedMask = cv2.bitwise_or(yellowThresholdImage, redThresholdImage, frame)
+        cv2.imshow('Image with Estimated Ball Center', frameCopy)
 
-            maskedImage = cv2.bitwise_and(frameCopy, frameCopy, mask = combinedMask)
-
-            weightedCombination = cv2.addWeighted(frameCopy, 0.1, maskedImage, 0.9, 0)
-
-            cv2.imshow('Ball Detection Data', weightedCombination)
-            out.write(weightedCombination)
-        else:
-            cv2.imshow('Image with Estimated Ball Center', frameCopy)
-            out.write(frameCopy)
-
-        k = cv2.waitKey(int(1000.0 / FPS)) & 0xFF
+        k = cv2.waitKey(int(1000.0 / 30)) & 0xFF
 
         if k == 27:
             # User hit ESC
             break
     output_path = './dataWithHands.csv'
 
-    with open(output_path, 'w') as csvfile:
-        fieldnames = ['frame', 'ball1Error', 'ball2Error', 'ball3Error', 'ball4Error']
-        writer = csv.DictWriter(csvfile, fieldnames = fieldnames)
-        writer.writeheader()
-        global output_data
-        output_data = map(lambda x: [x[0]] + x[1], zip(range(len(output_data)),output_data))
-        for data in output_data:
-            #x, y, r, f = data[0], data[1], data[2], data[3]
-            print data
-            writer.writerow({'frame': data[0], 'ball1Error': data[1], 'ball2Error': data[2], 'ball3Error': data[3], 'ball4Error': data[4]})
-
+    # with open(output_path, 'w') as csvfile:
+    #     fieldnames = ['frame', 'ball1Error', 'ball2Error', 'ball3Error', 'ball4Error']
+    #     writer = csv.DictWriter(csvfile, fieldnames = fieldnames)
+    #     writer.writeheader()
+    #     global output_data
+    #     output_data = map(lambda x: [x[0]] + x[1], zip(range(len(output_data)),output_data))
+    #     for data in output_data:
+    #         #x, y, r, f = data[0], data[1], data[2], data[3]
+    #         print data
+    #         writer.writerow({'frame': data[0], 'ball1Error': data[1], 'ball2Error': data[2], 'ball3Error': data[3], 'ball4Error': data[4]})
+    #
     cap.release()
-    out.release()
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
